@@ -76,6 +76,7 @@ int signalSetup(void)
 {
     struct sigaction act;
 
+    memset(&act, 0, sizeof(struct sigaction));
     act.sa_flags = SA_SIGINFO;
     act.sa_sigaction = &signalHandler;
     if (sigaction(SIGALRM, &act, NULL) != 0) {
