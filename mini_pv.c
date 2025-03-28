@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 #include <bits/sigaction.h>
 
-#define BUFF_BYTES_LEN 4096
+#define BUFF_BYTES_LEN 4    // 4096
 
 int fd = -1;
 ssize_t lastAlarmBytes = 0;
@@ -109,11 +109,12 @@ int openFile(const char *filepath)
 int readFile()
 {
     ssize_t readRet = -1;
+
     void *buffer[BUFF_BYTES_LEN];
 
     readRet = read(fd, buffer, BUFF_BYTES_LEN);
     while (readRet != 0) {
-        if (readRet == (ssize_t) -1 && errno != EINTR) {
+        if (readRet == (ssize_t) -1) {
             perror("read");
             return 84;
         }
