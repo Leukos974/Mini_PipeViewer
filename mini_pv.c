@@ -16,6 +16,8 @@
 #include <sys/stat.h>
 #include <bits/sigaction.h>
 
+#define BUFF_BYTES_LEN 4096
+
 int fd = -1;
 ssize_t lastAlarmBytes = 0;
 ssize_t wroteBytes = 0;
@@ -25,13 +27,12 @@ void displayTime(void)
 {
     struct timespec preciseTime;
     struct tm brokenLocalTime;
-    char *buffer = malloc(sizeof(char) * 50 + 1);
+    char buffer[32];
 
     clock_gettime(CLOCK_REALTIME, &preciseTime);
     localtime_r(&preciseTime.tv_sec, &brokenLocalTime);
     strftime(buffer, 50, "%Y-%m-%d %H:%M:%S", &brokenLocalTime);
     fprintf(stderr, "%s.%06lu:", buffer, preciseTime.tv_nsec / 1000);
-    free(buffer);
 }
 
 void displayProgress(void)
@@ -54,11 +55,9 @@ void signalHandler(int signalNum, siginfo_t *info, void *context)
     switch (signalNum) {
         case SIGALRM:
             if (sigaction(SIGALRM, NULL, NULL) == 0) {
-                // printf("BELL!!\n");
                 displayTime();
                 displayProgress();
                 fprintf(stderr, "\n");
-                // fflush(stderr);
                 lastAlarmBytes = wroteBytes;
                 alarm(1);
             }
@@ -95,12 +94,12 @@ int openFile(const char *filepath)
     struct stat sb;
 
     if (stat(filepath, &sb) != 0) {
-        perror(strerror(errno));
+        perror("stat");
         return fd;
     }
     fd = open(filepath, O_RDONLY);
     if (fd == -1) {
-        perror(strerror(errno));
+        perror("open");
         return fd;
     }
     fileSize = sb.st_size;
@@ -110,24 +109,21 @@ int openFile(const char *filepath)
 int readFile()
 {
     ssize_t readRet = -1;
-    size_t nBytes = 4;
-    void *buffer = malloc(nBytes);
+    void *buffer[BUFF_BYTES_LEN];
 
-    readRet = read(fd, buffer, nBytes);
+    readRet = read(fd, buffer, BUFF_BYTES_LEN);
     while (readRet != 0) {
-        if (readRet == (ssize_t) -1) {
-            perror(strerror(errno));
-            free(buffer);
+        if (readRet == (ssize_t) -1 && errno != EINTR) {
+            perror("read");
             return 84;
         }
-        if (write(STDOUT_FILENO, buffer, nBytes) < 0){
-            free(buffer);
+        if (write(STDOUT_FILENO, buffer, BUFF_BYTES_LEN) < 0){
+            perror("write");
             return 84;
         }
         wroteBytes += readRet;
-        readRet = read(fd, buffer, nBytes);
+        readRet = read(fd, buffer, BUFF_BYTES_LEN);
     }
-    free(buffer);
     displayTime();
     displayProgress();
     fprintf(stderr, "\n");
@@ -142,7 +138,7 @@ int main(int ac, char **av)
         return 84;
     alarm(1);
     if (ac < 2)
-        return readFile(STDIN_FILENO);
+        return 84;
     fd = openFile(av[1]);
     if (fd < 0)
         return 84;
