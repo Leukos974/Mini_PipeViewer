@@ -1,0 +1,133 @@
+/*
+** EPITECH PROJECT, 2025
+** PipeViewer
+** File description:
+** main
+*/
+
+#include <time.h>
+#include <stdio.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <signal.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <bits/sigaction.h>
+
+struct timespec *getTime(void)
+{
+    struct timespec *ts = malloc(sizeof(struct timespec));
+
+    clock_gettime(CLOCK_REALTIME, ts);
+    return ts;
+}
+
+void displayTime(void)
+{
+    struct timespec *preciseTime = NULL;
+    struct tm *brokenLocalTime = malloc(sizeof(struct tm));
+    char *buffer = malloc(sizeof(char) * 50 + 1);
+
+    preciseTime = getTime();
+    localtime_r(&preciseTime->tv_sec, brokenLocalTime);
+    strftime(buffer, 50, "%Y-%m-%d %H:%M:%S", brokenLocalTime);
+    fprintf(stderr, "%s.%06lu\n", buffer, preciseTime->tv_nsec / 1000);
+    free(preciseTime);
+    free(brokenLocalTime);
+    free(buffer);
+}
+
+void signalHandler(int signalNum, siginfo_t *info, void *context)
+{
+    (void) info;
+    (void) context;
+    switch (signalNum) {
+        case SIGALRM:
+            if (sigaction(SIGALRM, NULL, NULL) == 0) {
+                // printf("BELL!!\n");
+                displayTime();
+                alarm(1);
+            }
+            break;
+        case SIGINT:
+            if (sigaction(SIGINT, NULL, NULL) == 0) {
+                fprintf(stderr, "Done!\n");
+                exit(EXIT_SUCCESS);
+            }
+            break;
+    }
+}
+
+int signalSetup(void)
+{
+    struct sigaction act;
+
+    act.sa_flags = SA_SIGINFO;
+    act.sa_sigaction = &signalHandler;
+    if (sigaction(SIGALRM, &act, NULL) != 0) {
+        perror(strerror(errno));
+        return 84;
+    }
+    if (sigaction(SIGINT, &act, NULL) != 0) {
+        perror(strerror(errno));
+        return 84;
+    }
+    return 0;
+}
+
+int openFile(const char *filepath)
+{
+    int fd = -1;
+    struct stat sb;
+
+    if (stat(filepath, &sb) != 0) {
+        perror(strerror(errno));
+        return fd;
+    }
+    fd = open(filepath, O_RDONLY);
+    if (fd == -1)
+        perror(strerror(errno));
+    return fd;
+}
+
+int readFile(int fd)
+{
+    size_t readRet = -1;
+    size_t nBytes = 4;
+    void *buffer = malloc(nBytes);
+
+    readRet = read(fd, buffer, nBytes);
+    while (readRet != 0) {
+        if (readRet == (size_t) -1) {
+            perror(strerror(errno));
+            free(buffer);
+            return 84;
+        }
+        if (write(STDOUT_FILENO, buffer, nBytes) < 0){
+            // add all wrote bytes (Progress & Bitrate)
+            free(buffer);
+            return 84;
+        }
+        readRet = read(fd, buffer, nBytes);
+    }
+    free(buffer);
+    displayTime();
+    return 0;
+}
+
+int main(int ac, char **av)
+{
+    int fd = -1;
+
+    if (signalSetup() != 0)
+        return 84;
+    alarm(1);
+    if (ac < 2)
+        return readFile(STDIN_FILENO);
+    fd = openFile(av[1]);
+    if (fd < 0)
+        return 84;
+    return readFile(fd);
+}
