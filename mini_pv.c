@@ -16,27 +16,35 @@
 #include <sys/stat.h>
 #include <bits/sigaction.h>
 
-struct timespec *getTime(void)
-{
-    struct timespec *ts = malloc(sizeof(struct timespec));
-
-    clock_gettime(CLOCK_REALTIME, ts);
-    return ts;
-}
+int fd = -1;
+ssize_t lastAlarmBytes = 0;
+ssize_t wroteBytes = 0;
+ssize_t fileSize = 0;
 
 void displayTime(void)
 {
-    struct timespec *preciseTime = NULL;
-    struct tm *brokenLocalTime = malloc(sizeof(struct tm));
+    struct timespec preciseTime;
+    struct tm brokenLocalTime;
     char *buffer = malloc(sizeof(char) * 50 + 1);
 
-    preciseTime = getTime();
-    localtime_r(&preciseTime->tv_sec, brokenLocalTime);
-    strftime(buffer, 50, "%Y-%m-%d %H:%M:%S", brokenLocalTime);
-    fprintf(stderr, "%s.%06lu\n", buffer, preciseTime->tv_nsec / 1000);
-    free(preciseTime);
-    free(brokenLocalTime);
+    clock_gettime(CLOCK_REALTIME, &preciseTime);
+    localtime_r(&preciseTime.tv_sec, &brokenLocalTime);
+    strftime(buffer, 50, "%Y-%m-%d %H:%M:%S", &brokenLocalTime);
+    fprintf(stderr, "%s.%06lu:", buffer, preciseTime.tv_nsec / 1000);
     free(buffer);
+}
+
+void displayProgress(void)
+{
+    double progress = 0;
+
+    fprintf(stderr, " Progress %lu b / %lu b ", wroteBytes, fileSize);
+    if (fileSize != 0) {
+        progress = ((double)wroteBytes / (double)fileSize) * 100;
+        fprintf(stderr, "(%.02f %%).", progress);
+    } else
+        fprintf(stderr, "(inf %%).");
+    fprintf(stderr, " Bitrate: %lu bytes/sec.", wroteBytes - lastAlarmBytes);
 }
 
 void signalHandler(int signalNum, siginfo_t *info, void *context)
@@ -48,11 +56,16 @@ void signalHandler(int signalNum, siginfo_t *info, void *context)
             if (sigaction(SIGALRM, NULL, NULL) == 0) {
                 // printf("BELL!!\n");
                 displayTime();
+                displayProgress();
+                fprintf(stderr, "\n");
+                // fflush(stderr);
+                lastAlarmBytes = wroteBytes;
                 alarm(1);
             }
             break;
         case SIGINT:
             if (sigaction(SIGINT, NULL, NULL) == 0) {
+                close(fd);
                 fprintf(stderr, "Done!\n");
                 exit(EXIT_SUCCESS);
             }
@@ -79,7 +92,6 @@ int signalSetup(void)
 
 int openFile(const char *filepath)
 {
-    int fd = -1;
     struct stat sb;
 
     if (stat(filepath, &sb) != 0) {
@@ -87,40 +99,45 @@ int openFile(const char *filepath)
         return fd;
     }
     fd = open(filepath, O_RDONLY);
-    if (fd == -1)
+    if (fd == -1) {
         perror(strerror(errno));
+        return fd;
+    }
+    fileSize = sb.st_size;
     return fd;
 }
 
-int readFile(int fd)
+int readFile()
 {
-    size_t readRet = -1;
+    ssize_t readRet = -1;
     size_t nBytes = 4;
     void *buffer = malloc(nBytes);
 
     readRet = read(fd, buffer, nBytes);
     while (readRet != 0) {
-        if (readRet == (size_t) -1) {
+        if (readRet == (ssize_t) -1) {
             perror(strerror(errno));
             free(buffer);
             return 84;
         }
         if (write(STDOUT_FILENO, buffer, nBytes) < 0){
-            // add all wrote bytes (Progress & Bitrate)
             free(buffer);
             return 84;
         }
+        wroteBytes += readRet;
         readRet = read(fd, buffer, nBytes);
     }
     free(buffer);
     displayTime();
+    displayProgress();
+    fprintf(stderr, "\n");
+    fprintf(stderr, "Done !\n");
+    close(fd);
     return 0;
 }
 
 int main(int ac, char **av)
 {
-    int fd = -1;
-
     if (signalSetup() != 0)
         return 84;
     alarm(1);
@@ -129,5 +146,5 @@ int main(int ac, char **av)
     fd = openFile(av[1]);
     if (fd < 0)
         return 84;
-    return readFile(fd);
+    return readFile();
 }
